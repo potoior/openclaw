@@ -27,6 +27,7 @@ import {
   expectError,
   expectOkPayload,
   hashContent,
+  hashSessionFile,
   prepareSessionFilesTest,
   removeWorkspaceFixture,
   writeWorkspaceFile,
@@ -101,7 +102,7 @@ const saveFile = (
     {
       path: name,
       content,
-      expectedHash: createHash("sha256").update(original).digest("hex"),
+      expectedHash: hashSessionFile(workspaceRoot, original),
     },
     context,
   );
@@ -116,7 +117,7 @@ const expectText = (name: string, content: string, extra: Record<string, unknown
   expectFile(name, {
     content,
     contentEncoding: "utf8",
-    hash: hashContent(content),
+    hash: hashSessionFile(workspaceRoot, content),
     mimeType: "text/plain",
     path: name,
     previewKind: "text",
@@ -574,7 +575,7 @@ describe("sessions.files RPC handlers", () => {
         sessionKey: nestedKey,
         path: "./vite.config.ts",
         content: "export default { second: true };\n",
-        expectedHash: hashContent(original),
+        expectedHash: hashSessionFile(workspacePath("ui"), original),
       }),
     ]);
 
@@ -586,14 +587,19 @@ describe("sessions.files RPC handlers", () => {
     expect(["export default { first: true };\n", "export default { second: true };\n"]).toContain(
       content,
     );
-    expect(conflict.details.currentHash).toBe(hashContent(content));
     const saved = expectOkPayload(calls.filter((call) => call.ok));
+    // Each session's CAS token is bound to its own workspace root, so the
+    // surviving save reports the winner's binding and the rejected save the
+    // loser's view of the winner's bytes.
+    const winnerRoot = saved.sessionKey === nestedKey ? workspacePath("ui") : workspaceRoot;
+    const loserRoot = saved.sessionKey === nestedKey ? workspaceRoot : workspacePath("ui");
+    expect(conflict.details.currentHash).toBe(hashSessionFile(loserRoot, content));
     expect(saved.file).toMatchObject({
       name: "vite.config.ts",
       kind: "modified",
       missing: false,
       size: Buffer.byteLength(content),
-      hash: hashContent(content),
+      hash: hashSessionFile(winnerRoot, content),
     });
     expect(Number.isInteger(saved.file.updatedAtMs)).toBe(true);
     expect(saved.file.content).toBeUndefined();
@@ -625,7 +631,7 @@ describe("sessions.files RPC handlers", () => {
 
     const preview = await files.ok("get", "bom.ts");
     expect(preview.file.content).toBe(original);
-    expect(preview.file.hash).toBe(hashContent(original));
+    expect(preview.file.hash).toBe(hashSessionFile(workspaceRoot, original));
 
     const next = "\uFEFFexport default { bom: true };\n";
     await files.ok("set", {

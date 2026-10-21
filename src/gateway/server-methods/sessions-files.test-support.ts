@@ -11,6 +11,7 @@ import type {
   GatewayRequestHandlerOptions,
   GatewayRequestHandlers,
 } from "./types.js";
+import { sessionWorkspaceFileHashBinding } from "./workspace-files.js";
 
 type SessionFilesOperation = "list" | "get" | "download" | "assets" | "set" | "reveal";
 type SessionFilesMethod = `sessions.files.${SessionFilesOperation}`;
@@ -239,6 +240,16 @@ export function prepareSessionFilesTest(
 
 export function hashContent(content: string): string {
   return createHash("sha256").update(content, "utf8").digest("hex");
+}
+
+/** Session Files CAS tokens are bound to the session workspace root. */
+export function hashSessionFile(root: string, content: string | Buffer): string {
+  // Stream the same byte sequence workspaceFileCasHash digests without going
+  // through Buffer.from, which oversize-rejection tests spy on.
+  const hash = createHash("sha256");
+  hash.update(`${sessionWorkspaceFileHashBinding(root)}\u0000`, "utf8");
+  hash.update(content);
+  return hash.digest("hex");
 }
 
 function createSessionEntryFixture(
